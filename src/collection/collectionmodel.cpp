@@ -50,6 +50,7 @@
 #include <QChar>
 #include <QRegularExpression>
 #include <QPixmapCache>
+#include <QGuiApplication>
 #include <QNetworkDiskCache>
 #include <QSettings>
 #include <QTimer>
@@ -115,7 +116,9 @@ CollectionModel::CollectionModel(const SharedPtr<CollectionBackend> backend, con
   const QIcon nocover = IconLoader::Load(u"cdcase"_s);
   if (!nocover.isNull()) {
     const QList<QSize> nocover_sizes = nocover.availableSizes();
-    pixmap_no_cover_ = nocover_sizes.isEmpty() ? nocover.pixmap(kPrettyCoverSize, kPrettyCoverSize) : nocover.pixmap(nocover_sizes.last()).scaled(kPrettyCoverSize, kPrettyCoverSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    const qreal device_pixel_ratio = qGuiApp->devicePixelRatio();
+    pixmap_no_cover_ = nocover_sizes.isEmpty() ? nocover.pixmap(QSize(kPrettyCoverSize, kPrettyCoverSize), device_pixel_ratio) : nocover.pixmap(nocover_sizes.last()).scaled(QSize(kPrettyCoverSize, kPrettyCoverSize) * device_pixel_ratio, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    pixmap_no_cover_.setDevicePixelRatio(device_pixel_ratio);
   }
 
   icon_disk_cache_->setCacheDirectory(StandardPaths::WritableLocation(StandardPaths::StandardLocation::CacheLocation) + u'/' + QLatin1String(kPixmapDiskCacheDir) + u'-' + Song::TextForSource(backend_->source()));
@@ -1053,7 +1056,13 @@ void CollectionModel::LoadSongsFromSqlAsyncFinished() {
 
 QString CollectionModel::AlbumIconPixmapCacheKey(const CollectionItem *item) const {
 
-  return Song::TextForSource(backend_->source()) + QLatin1Char('/') + item->container_key;
+  QString cache_key = Song::TextForSource(backend_->source()) + QLatin1Char('/') + item->container_key;
+
+  // The thumbnails have the size of the device pixel ratio, the keys for a device pixel ratio of 1 are kept, so the existing thumbnails are still used.
+  const qreal device_pixel_ratio = qGuiApp->devicePixelRatio();
+  if (!qFuzzyCompare(device_pixel_ratio, 1.0)) cache_key += QLatin1Char('@') + QString::number(device_pixel_ratio);
+
+  return cache_key;
 
 }
 
@@ -1103,6 +1112,7 @@ QVariant CollectionModel::AlbumIcon(CollectionItem *item) {
     if (disk_cache_img) {
       QImage cached_image;
       if (cached_image.load(&*disk_cache_img, "XPM")) {
+        cached_image.setDevicePixelRatio(qGuiApp->devicePixelRatio());
         QPixmapCache::insert(cache_key, QPixmap::fromImage(cached_image));
         return QPixmap::fromImage(cached_image);
       }
@@ -1119,6 +1129,7 @@ QVariant CollectionModel::AlbumIcon(CollectionItem *item) {
   if (!songs.isEmpty()) {
     AlbumCoverLoaderOptions cover_loader_options(AlbumCoverLoaderOptions::Option::ScaledImage | AlbumCoverLoaderOptions::Option::PadScaledImage);
     cover_loader_options.desired_scaled_size = QSize(kPrettyCoverSize, kPrettyCoverSize);
+    cover_loader_options.device_pixel_ratio = qGuiApp->devicePixelRatio();
     cover_loader_options.types = cover_types_;
     const quint64 id = albumcover_loader_->LoadImageAsync(cover_loader_options, songs.first());
     pending_art_[id] = ItemAndCacheKey(item, cache_key);
